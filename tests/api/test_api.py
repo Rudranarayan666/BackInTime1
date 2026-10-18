@@ -62,6 +62,38 @@ def test_profiles_are_loaded_from_core_config_store(tmp_path: Path) -> None:
     }
 
 
+def test_profile_detail_returns_configured_profile(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profiles": [
+                    {
+                        "profile_id": "work",
+                        "name": "Work",
+                        "sources": [str(tmp_path / "source")],
+                        "target": str(tmp_path / "target"),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = _client(config_path).get("/api/v1/profiles/work")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "profile_id": "work",
+        "name": "Work",
+        "sources": [str(tmp_path / "source")],
+        "target": str(tmp_path / "target"),
+        "excludes": [],
+    }
+    assert response.headers["x-request-id"]
+
+
 def test_profile_detail_returns_404_for_unknown_profile(tmp_path: Path) -> None:
     response = _client(tmp_path / "missing.json").get("/api/v1/profiles/not-configured")
 
@@ -83,6 +115,33 @@ def test_invalid_config_returns_structured_error(tmp_path: Path) -> None:
     )
     assert str(config_path) not in response.text
     assert response.json()["error"]["request_id"] == response.headers["x-request-id"]
+
+
+def test_semantically_invalid_config_returns_structured_error(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profiles": [
+                    {
+                        "profile_id": "work",
+                        "name": "Work",
+                        "sources": ["relative/source"],
+                        "target": str(tmp_path / "target"),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = _client(config_path).get("/api/v1/profiles")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "CONFIGURATION_INVALID"
+    assert response.json()["error"]["request_id"] == response.headers["x-request-id"]
+    assert "relative/source" not in response.text
 
 
 def test_invalid_profile_id_is_not_interpreted_as_a_path(tmp_path: Path) -> None:
