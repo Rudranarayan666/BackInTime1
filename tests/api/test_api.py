@@ -14,6 +14,20 @@ def _client(config_path: Path) -> TestClient:
     )
 
 
+def _write_headers(etag: str) -> dict[str, str]:
+    return {"Origin": "http://127.0.0.1:5173", "If-Match": etag}
+
+
+def _profile_payload(tmp_path: Path, profile_id: str = "new-profile") -> dict[str, object]:
+    return {
+        "profile_id": profile_id,
+        "name": "Disposable profile",
+        "sources": [str(tmp_path / "source")],
+        "target": str(tmp_path / "target"),
+        "excludes": ["*.cache"],
+    }
+
+
 def test_health_returns_version_and_request_id(tmp_path: Path) -> None:
     response = _client(tmp_path / "config.json").get("/api/v1/health")
 
@@ -207,8 +221,8 @@ def test_allowed_origin_passes_security_check_for_state_changing_method(
         headers={"Origin": "http://127.0.0.1:5173"},
     )
 
-    assert response.status_code == 405
-    assert response.json()["error"]["code"] == "HTTP_ERROR"
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "REQUEST_INVALID"
 
 
 def test_origin_with_path_or_null_origin_is_rejected(tmp_path: Path) -> None:
@@ -218,3 +232,132 @@ def test_origin_with_path_or_null_origin_is_rejected(tmp_path: Path) -> None:
         response = client.get("/api/v1/health", headers={"Origin": origin})
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "ORIGIN_NOT_ALLOWED"
+
+
+def test_profile_creation_uses_config_revision_and_validates_paths(tmp_path: Path) -> None:
+    client = _client(tmp_path / "config.json")
+    revision = client.get("/api/v1/profiles").headers["etag"]
+
+    response = client.post(
+        "/api/v1/profiles",
+        json=_profile_payload(tmp_path),
+        headers=_write_headers(revision),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["profile_id"] == "new-profile"
+    assert response.headers["etag"] != revision
+    assert client.get("/api/v1/profiles/new-profile").status_code == 200
+
+
+def test_profile_creation_requires_current_etag(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    client = _client(config_path)
+
+    response = client.post(
+        "/api/v1/profiles",
+        json=_profile_payload(tmp_path),
+        headers={"Origin": "http://127.0.0.1:5173"},
+    )
+
+    assert response.status_code == 428
+    assert response.json()["error"]["code"] == "PRECONDITION_REQUIRED"
+    assert not config_path.exists()
+
+
+def test_duplicate_profile_creation_is_rejected_without_overwriting(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    client = _client(config_path)
+    first_revision = client.get("/api/v1/profiles").headers["etag"]
+    created = client.post(
+        "/api/v1/profiles",
+        json=_profile_payload(tmp_path, "duplicate"),
+        headers=_write_headers(first_revision),
+    )
+    original_content = config_path.read_bytes()
+    current_revision = created.headers["etag"]
+
+    response = client.post(
+        "/api/v1/profiles",
+        json=_profile_payload(tmp_path, "duplicate"),
+        headers=_write_headers(current_revision),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "PROFILE_EXISTS"
+    assert config_path.read_bytes() == original_content
+
+
+def test_profile_patch_rejects_stale_revision(tmp_path: Path) -> None:
+    client = _client(tmp_path / "config.json")
+    initial_revision = client.get("/api/v1/profiles").headers["etag"]
+    created = client.post(
+        "/api/v1/profiles",
+        json=_profile_payload(tmp_path, "editable"),
+        headers=_write_headers(initial_revision),
+    )
+    current_revision = created.headers["etag"]
+
+    updated = client.patch(
+        "/api/v1/profiles/editable",
+        json={"name": "Updated name"},
+        headers=_write_headers(current_revision),
+    )
+    stale = client.patch(
+        "/api/v1/profiles/editable",
+        json={"name": "Lost update"},
+        headers=_write_headers(current_revision),
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Updated name"
+    assert stale.status_code == 412
+    assert stale.json()["error"]["code"] == "CONFIGURATION_CHANGED"
+    assert client.get("/api/v1/profiles/editable").json()["name"] == "Updated name"
+
+
+def test_invalid_profile_patch_does_not_modify_configuration(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    client = _client(config_path)
+    revision = client.get("/api/v1/profiles").headers["etag"]
+    created = client.post(
+        "/api/v1/profiles",
+        json=_profile_payload(tmp_path, "editable"),
+        headers=_write_headers(revision),
+    )
+    original_content = config_path.read_bytes()
+
+    response = client.patch(
+        "/api/v1/profiles/editable",
+        json={"sources": ["relative/source"]},
+        headers=_write_headers(created.headers["etag"]),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "PROFILE_INVALID"
+    assert config_path.read_bytes() == original_content
+
+
+def test_profile_delete_removes_only_configuration(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    client = _client(config_path)
+    payload = _profile_payload(tmp_path, "deletable")
+    target = Path(str(payload["target"]))
+    target.mkdir()
+    marker = target / "keep.txt"
+    marker.write_text("preserve backup target", encoding="utf-8")
+    revision = client.get("/api/v1/profiles").headers["etag"]
+    created = client.post(
+        "/api/v1/profiles",
+        json=payload,
+        headers=_write_headers(revision),
+    )
+
+    response = client.delete(
+        "/api/v1/profiles/deletable",
+        headers=_write_headers(created.headers["etag"]),
+    )
+
+    assert response.status_code == 204
+    assert client.get("/api/v1/profiles").json() == {"profiles": []}
+    assert marker.read_text(encoding="utf-8") == "preserve backup target"
