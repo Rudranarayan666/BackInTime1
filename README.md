@@ -126,6 +126,47 @@ methods so command-line clients can read status; state-changing methods must inc
 allowed origin. CORS is not an authentication mechanism, and these checks do not make
 network exposure safe.
 
+#### Frontend API configuration
+
+The frontend reads one optional build-time environment variable,
+`VITE_API_BASE_URL`, in `frontend/src/lib/api.ts`. It sets the URL prefix for every
+API request, and a trailing slash is removed.
+
+- **Default (unset):** requests go to the same-origin path `/api/v1`. During
+  `npm run dev`, the Vite server in `frontend/vite.config.ts` forwards every `/api`
+  request to `http://127.0.0.1:8000` with `changeOrigin: false`, so the API sees a
+  loopback `Host` header and the browser never makes a cross-origin request. This is
+  the recommended setup for local development.
+- **Custom value:** the frontend calls `${VITE_API_BASE_URL}/health`,
+  `${VITE_API_BASE_URL}/system/info`, and `${VITE_API_BASE_URL}/profiles` directly
+  instead of `/api/v1/...`. The value must include the API's `/api/v1` prefix. A
+  same-origin path such as `/api/v1` works with the Vite proxy. An absolute URL on
+  another origin, such as `http://127.0.0.1:8000/api/v1`, is a cross-origin request
+  from the browser; the API does not currently send CORS headers, so browsers will
+  block those responses. Keep the value on the same origin as the frontend, or use a
+  same-origin proxy that forwards to the loopback API.
+
+Vite inlines `VITE_*` variables into the JavaScript bundle at build time, so changing
+the value requires restarting `npm run dev` or rebuilding. A local example, kept in
+`frontend/.env.local` (Git ignores `.env.local` and `.env.*.local` files):
+
+```sh
+# frontend/.env.local
+VITE_API_BASE_URL=/api/v1
+```
+
+Or for a single run:
+
+```sh
+cd frontend
+VITE_API_BASE_URL=/api/v1 npm run dev
+```
+
+**Do not put passwords, API tokens, private keys, or other secrets in `VITE_*`
+variables.** Every `VITE_*` value is embedded in the built JavaScript and can be read
+by anyone who loads the frontend. The local API has no authentication, so no
+credential is needed here.
+
 Run frontend checks from `frontend/` with `npm test` and `npm run build`. The API and
 frontend have been exercised in the development environment; Linux and rsync-specific
 backup behaviour has not.
