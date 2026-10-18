@@ -1,13 +1,20 @@
 """Versioned JSON configuration and profile persistence."""
 
+import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
-from backintime.core.exceptions import ConfigurationError, ValidationError
+from backintime.core.exceptions import (
+    ConfigurationConflictError,
+    ConfigurationError,
+    ValidationError,
+)
 from backintime.core.profile import Profile
 
 CONFIG_VERSION = 1
@@ -34,6 +41,7 @@ class ConfigStore:
 
     def __init__(self, path: Path) -> None:
         self.path = path.expanduser()
+        self._lock = RLock()
 
     @classmethod
     def default_path(cls) -> Path:
@@ -83,8 +91,36 @@ class ConfigStore:
             raise ConfigurationError(f"Invalid configuration: {exc}") from exc
         return configuration
 
+    def load_with_revision(self) -> tuple[Configuration, str]:
+        """Load configuration and return its content hash for optimistic updates."""
+        with self._lock:
+            configuration = self.load()
+            return configuration, self._revision_unlocked()
+
+    def update(
+        self,
+        expected_revision: str,
+        transform: Callable[[Configuration], Configuration],
+    ) -> tuple[Configuration, str]:
+        """Serialize a validated read-modify-write and reject stale revisions."""
+        with self._lock:
+            configuration, current_revision = self.load_with_revision()
+            if current_revision != expected_revision:
+                raise ConfigurationConflictError("Configuration changed since it was last read.")
+            updated = transform(configuration)
+            try:
+                updated.validate()
+            except ValidationError:
+                raise
+            self.save(updated)
+            return updated, self._revision_unlocked()
+
     def save(self, configuration: Configuration) -> None:
         """Validate and atomically replace the configuration file."""
+        with self._lock:
+            self._save_locked(configuration)
+
+    def _save_locked(self, configuration: Configuration) -> None:
         try:
             configuration.validate()
         except ValidationError as exc:
@@ -117,6 +153,15 @@ class ConfigStore:
                     temporary_path.unlink()
         except (OSError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Cannot write configuration '{self.path}': {exc}") from exc
+
+    def _revision_unlocked(self) -> str:
+        try:
+            content = self.path.read_bytes()
+        except FileNotFoundError:
+            content = b""
+        except OSError as exc:
+            raise ConfigurationError(f"Cannot read configuration '{self.path}': {exc}") from exc
+        return hashlib.sha256(content).hexdigest()
 
 
 def _parse_profile(value: Any) -> Profile:
