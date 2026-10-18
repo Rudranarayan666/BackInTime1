@@ -43,9 +43,28 @@ We welcome contributions involving:
 
 ## Development Setup
 
-Follow the installation and development instructions provided in the repository.
+Use Python 3.10 or newer and follow the setup and CLI examples in
+[README.md](README.md). The current development checks are:
 
-The project intends to use Python, pytest, and Ruff. Exact commands should be added here once the dependency configuration and test setup are available.
+```sh
+python -m pip install -e ".[dev]"
+python -m pytest
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy src
+```
+
+The web interface has independent checks from the `frontend/` directory:
+
+```sh
+npm ci
+npm test
+npm run build
+npm audit
+```
+
+The local snapshot engine is not implemented yet; do not use this foundation to back up
+or restore personal data.
 
 Before submitting changes:
 

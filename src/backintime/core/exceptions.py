@@ -1,0 +1,17 @@
+"""Typed application exceptions for actionable user-facing errors."""
+
+
+class BackInTimeError(Exception):
+    """Base class for expected application errors."""
+
+
+class ConfigurationError(BackInTimeError):
+    """Raised when configuration cannot be loaded, validated, or saved."""
+
+
+class ValidationError(BackInTimeError):
+    """Raised when user-provided values or paths are invalid."""
+
+
+class RepositoryError(BackInTimeError):
+    """Raised when a snapshot repository cannot be safely inspected."""

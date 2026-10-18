@@ -63,7 +63,9 @@ Issue numbers from other repositories may be mentioned in development notes as r
 The initial technology direction is:
 
 - **Language:** Python
-- **Desktop interface:** PySide6, planned
+- **API:** FastAPI with Pydantic validation
+- **Web interface:** React, TypeScript, and Vite
+- **Native desktop interface:** PySide6, planned
 - **File transfer:** rsync where appropriate
 - **State management:** SQLite or another reviewed approach
 - **Testing:** pytest
@@ -74,17 +76,60 @@ The architecture may evolve as implementation requirements are validated. Backup
 
 ## Getting Started
 
-The project is under development, so installation and execution commands will be added after a runnable version and its dependency setup have been established.
+The initial project foundation requires Python 3.10 or newer. From a checkout, install
+the package and development tools in a virtual environment:
 
-For development:
+```sh
+python -m pip install -e ".[dev]"
+backintime --help
+backintime --version
+backintime check-config
+python -m pytest
+```
 
-1. Clone this repository.
-2. Review the current project structure and setup instructions.
-3. Create an isolated Python environment.
-4. Install the dependencies documented by the project.
-5. Run the available tests before trying backup operations.
+Configuration is versioned JSON stored at
+`$XDG_CONFIG_HOME/backintime/config.json`, or `~/.config/backintime/config.json`
+when `XDG_CONFIG_HOME` is not set. `check-config` accepts `--config PATH` to inspect a
+specific file. No backup, restore, or snapshot deletion command is implemented yet.
 
-Use temporary directories and disposable test data. Do not test experimental backup or restore functionality against your only copy of important files.
+### Local API and frontend
+
+Install backend and frontend dependencies in separate terminals:
+
+```sh
+python -m pip install -e ".[dev]"
+python -m uvicorn backintime.api.app:app --host 127.0.0.1 --port 8000
+```
+
+```sh
+cd frontend
+npm ci
+npm run dev
+```
+
+The Vite development server proxies `/api` to the loopback-only API. The API's
+interactive OpenAPI documentation is available at `http://127.0.0.1:8000/docs`.
+The current API supports health checks, non-sensitive runtime capability checks, and
+read-only profile listing/detail. It does not start backups, expose snapshots, modify
+profiles, or perform restore/prune operations. Do not bind the API to a network-facing
+interface: the initial local application has no authentication. CORS is not an
+authentication mechanism.
+
+Run frontend checks from `frontend/` with `npm test` and `npm run build`. The API and
+frontend have been exercised in the development environment; Linux and rsync-specific
+backup behaviour has not.
+
+Use temporary directories and disposable test data. Do not test experimental backup or
+restore functionality against your only copy of important data.
+
+## Current Implementation Status
+
+The initial foundation provides profile and configuration validation, atomic
+configuration writes, strict snapshot-ID parsing, read-only listing of snapshots marked
+complete in metadata, path-boundary validation, basic CLI version/help/config checks,
+and a local FastAPI/React interface for service status and configured profiles. The
+backup engine, restore, deletion, retention, scheduling, and snapshot UI are not
+implemented. This milestone has not been validated on Linux or with rsync.
 
 ## Testing Strategy
 
