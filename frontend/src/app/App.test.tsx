@@ -16,7 +16,7 @@ const profileResponse = {
   ],
 };
 
-function mockApi() {
+function mockApi(profiles: typeof profileResponse = profileResponse) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -26,7 +26,7 @@ function mockApi() {
           ? { status: "ok", version: "0.1.0" }
           : url.endsWith("/system/info")
             ? { platform: "Windows", python_version: "3.12.7", rsync_available: false }
-            : profileResponse;
+            : profiles;
       return new Response(JSON.stringify(payload), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -79,5 +79,21 @@ describe("BackInTime app", () => {
 
     expect(await screen.findByText("Configured profiles")).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText("Home files").length).toBeGreaterThan(0));
+  });
+
+  it("explains the empty-profile state without offering profile creation", async () => {
+    mockApi({ profiles: [] });
+
+    render(
+      <MemoryRouter initialEntries={["/profiles"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("No profiles configured")).toBeInTheDocument();
+    expect(screen.getByText(/Profiles cannot be created in the app yet/)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /Read the configuration instructions/ });
+    expect(link).toHaveAttribute("href", "https://github.com/timevault-dev/BackInTime#getting-started");
+    expect(screen.queryByRole("button", { name: /add profile/i })).not.toBeInTheDocument();
   });
 });
