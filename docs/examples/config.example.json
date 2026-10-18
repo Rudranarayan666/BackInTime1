@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "profile_id": "demo",
+      "name": "Disposable demo files",
+      "sources": [
+        "/tmp/backintime-demo/source"
+      ],
+      "target": "/tmp/backintime-demo/snapshots",
+      "excludes": [
+        "*.cache",
+        "temporary/"
+      ]
+    }
+  ]
+}
