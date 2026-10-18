@@ -91,6 +91,8 @@ Configuration is versioned JSON stored at
 `$XDG_CONFIG_HOME/backintime/config.json`, or `~/.config/backintime/config.json`
 when `XDG_CONFIG_HOME` is not set. `check-config` accepts `--config PATH` to inspect a
 specific file. No backup, restore, or snapshot deletion command is implemented yet.
+See [the configuration guide](docs/configuration.md) for the current schema, validation
+rules, and a disposable example.
 
 ### Local API and frontend
 
