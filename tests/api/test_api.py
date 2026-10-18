@@ -8,7 +8,10 @@ from backintime.core.config import ConfigStore
 
 
 def _client(config_path: Path) -> TestClient:
-    return TestClient(create_app(config_store=ConfigStore(config_path)))
+    return TestClient(
+        create_app(config_store=ConfigStore(config_path)),
+        base_url="http://127.0.0.1:8000",
+    )
 
 
 def test_health_returns_version_and_request_id(tmp_path: Path) -> None:
@@ -149,3 +152,69 @@ def test_invalid_profile_id_is_not_interpreted_as_a_path(tmp_path: Path) -> None
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_loopback_host_and_frontend_origin_are_allowed(tmp_path: Path) -> None:
+    response = _client(tmp_path / "config.json").get(
+        "/api/v1/health",
+        headers={"Origin": "http://127.0.0.1:5173"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_untrusted_host_is_rejected_as_rebinding_attempt(tmp_path: Path) -> None:
+    response = _client(tmp_path / "config.json").get(
+        "/api/v1/health",
+        headers={"Host": "attacker.example"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "HOST_NOT_ALLOWED"
+    assert response.headers["x-request-id"] == response.json()["error"]["request_id"]
+
+
+def test_untrusted_origin_is_rejected(tmp_path: Path) -> None:
+    response = _client(tmp_path / "config.json").get(
+        "/api/v1/health",
+        headers={"Origin": "http://attacker.example"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "ORIGIN_NOT_ALLOWED"
+
+
+def test_originless_safe_request_remains_available_to_non_browser_clients(
+    tmp_path: Path,
+) -> None:
+    response = _client(tmp_path / "config.json").get("/api/v1/health")
+
+    assert response.status_code == 200
+
+
+def test_originless_state_changing_request_is_rejected(tmp_path: Path) -> None:
+    response = _client(tmp_path / "config.json").post("/api/v1/profiles")
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "ORIGIN_REQUIRED"
+
+
+def test_allowed_origin_passes_security_check_for_state_changing_method(
+    tmp_path: Path,
+) -> None:
+    response = _client(tmp_path / "config.json").post(
+        "/api/v1/profiles",
+        headers={"Origin": "http://127.0.0.1:5173"},
+    )
+
+    assert response.status_code == 405
+    assert response.json()["error"]["code"] == "HTTP_ERROR"
+
+
+def test_origin_with_path_or_null_origin_is_rejected(tmp_path: Path) -> None:
+    client = _client(tmp_path / "config.json")
+
+    for origin in ("null", "http://127.0.0.1:5173/untrusted"):
+        response = client.get("/api/v1/health", headers={"Origin": origin})
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "ORIGIN_NOT_ALLOWED"

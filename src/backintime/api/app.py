@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
@@ -16,6 +17,15 @@ from backintime.core.config import ConfigStore
 
 _request_id: ContextVar[str] = ContextVar("backintime_request_id", default="-")
 _logger = logging.getLogger("backintime.api")
+_ALLOWED_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "[::1]", "::1"})
+_DEVELOPMENT_ORIGINS = frozenset(
+    {
+        ("http", "127.0.0.1", 5173),
+        ("http", "localhost", 5173),
+        ("http", "::1", 5173),
+    }
+)
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 def create_app(*, config_store: ConfigStore | None = None) -> FastAPI:
@@ -35,6 +45,30 @@ def create_app(*, config_store: ConfigStore | None = None) -> FastAPI:
         request_id = uuid4().hex
         token = _request_id.set(request_id)
         try:
+            host = request.headers.get("host")
+            if not _is_allowed_host(host):
+                return _error_response(
+                    400,
+                    "HOST_NOT_ALLOWED",
+                    "The request Host must be a loopback address.",
+                )
+
+            origin = request.headers.get("origin")
+            if origin is not None:
+                allowed_origins = _DEVELOPMENT_ORIGINS | {_request_origin(request)}
+                if _origin_key(origin) not in allowed_origins:
+                    return _error_response(
+                        403,
+                        "ORIGIN_NOT_ALLOWED",
+                        "The browser request origin is not allowed.",
+                    )
+            elif request.method.upper() not in _SAFE_METHODS:
+                return _error_response(
+                    403,
+                    "ORIGIN_REQUIRED",
+                    "State-changing requests must include an allowed Origin header.",
+                )
+
             response = await call_next(request)
             response.headers["X-Request-ID"] = request_id
             return response
@@ -91,6 +125,59 @@ def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
         content=body.model_dump(),
         headers={"X-Request-ID": _request_id.get()},
     )
+
+
+def _is_allowed_host(host: str | None) -> bool:
+    """Accept only explicit loopback hostnames, rejecting rebinding host values."""
+    if host is None:
+        return False
+    try:
+        parsed = urlsplit(f"//{host}")
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.hostname is not None
+        and parsed.hostname.lower() in _ALLOWED_HOSTNAMES
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path == ""
+        and parsed.query == ""
+        and parsed.fragment == ""
+        and (port is None or 1 <= port <= 65535)
+    )
+
+
+def _origin_key(origin: str) -> tuple[str, str, int] | None:
+    """Normalize a strict HTTP(S) origin into a comparable scheme/host/port tuple."""
+    try:
+        parsed = urlsplit(origin)
+        port = parsed.port
+    except ValueError:
+        return None
+
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path != ""
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+
+    scheme = parsed.scheme.lower()
+    effective_port = port or (443 if scheme == "https" else 80)
+    return scheme, parsed.hostname.lower(), effective_port
+
+
+def _request_origin(request: Request) -> tuple[str, str, int]:
+    """Return the normalized origin of the current loopback API request."""
+    origin = _origin_key(f"{request.url.scheme}://{request.headers['host']}")
+    if origin is None:
+        raise RuntimeError("Validated request host did not produce a valid origin.")
+    return origin
 
 
 app = create_app()
