@@ -112,8 +112,13 @@ interactive OpenAPI documentation is available at `http://127.0.0.1:8000/docs`.
 The current API supports health checks, non-sensitive runtime capability checks, and
 read-only profile listing/detail. It does not start backups, expose snapshots, modify
 profiles, or perform restore/prune operations. Do not bind the API to a network-facing
-interface: the initial local application has no authentication. CORS is not an
-authentication mechanism.
+interface: the initial local application has no authentication. The API rejects
+non-loopback `Host` values and untrusted browser `Origin` values; the default Vite
+frontend origins (`http://127.0.0.1:5173`, `http://localhost:5173`, and
+`http://[::1]:5173`) are allowed. Requests without an `Origin` are allowed for safe
+methods so command-line clients can read status; state-changing methods must include an
+allowed origin. CORS is not an authentication mechanism, and these checks do not make
+network exposure safe.
 
 Run frontend checks from `frontend/` with `npm test` and `npm run build`. The API and
 frontend have been exercised in the development environment; Linux and rsync-specific
