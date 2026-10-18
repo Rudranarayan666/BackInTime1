@@ -9,6 +9,10 @@ class ConfigurationError(BackInTimeError):
     """Raised when configuration cannot be loaded, validated, or saved."""
 
 
+class ConfigurationConflictError(BackInTimeError):
+    """Raised when configuration changed since a caller last read it."""
+
+
 class ValidationError(BackInTimeError):
     """Raised when user-provided values or paths are invalid."""
 

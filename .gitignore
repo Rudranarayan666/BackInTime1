@@ -8,3 +8,5 @@ node_modules/
 build/
 dist/
 frontend/dist/
+.env.local
+.env.*.local

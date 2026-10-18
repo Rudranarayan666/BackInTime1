@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from backintime.core.config import ConfigStore, Configuration
-from backintime.core.exceptions import ConfigurationError
+from backintime.core.exceptions import ConfigurationConflictError, ConfigurationError
 from backintime.core.profile import Profile
 
 
@@ -33,6 +33,35 @@ def test_config_save_and_load_preserves_extensions(tmp_path: Path) -> None:
     store.save(configuration)
 
     assert store.load() == configuration
+
+
+def test_config_update_rejects_a_stale_revision(tmp_path: Path) -> None:
+    store = ConfigStore(tmp_path / "config.json")
+    initial_revision = store.load_with_revision()[1]
+    store.update(initial_revision, lambda configuration: configuration)
+
+    with pytest.raises(ConfigurationConflictError):
+        store.update(initial_revision, lambda configuration: configuration)
+
+
+def test_failed_atomic_config_write_preserves_existing_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.json"
+    store = ConfigStore(config_path)
+    store.save(Configuration())
+    original_content = config_path.read_bytes()
+
+    def fail_replace(source: str | bytes, destination: str | bytes) -> None:
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr("backintime.core.config.os.replace", fail_replace)
+
+    with pytest.raises(ConfigurationError, match="simulated replace failure"):
+        store.save(Configuration(profiles=(_profile(tmp_path),)))
+
+    assert config_path.read_bytes() == original_content
+    assert list(tmp_path.glob(".config.json.*.tmp")) == []
 
 
 def test_invalid_config_is_not_replaced_with_defaults(tmp_path: Path) -> None:

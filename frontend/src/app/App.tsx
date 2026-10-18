@@ -4,6 +4,8 @@ import { NavLink, Route, Routes } from "react-router-dom";
 import { ApiError, api } from "../lib/api";
 import type { Health, Profile, SystemInfo } from "../types/api";
 
+const CONFIGURATION_DOCS_URL = "https://github.com/timevault-dev/BackInTime#getting-started";
+
 type LoadState<T> =
   | { status: "loading" }
   | { status: "error"; message: string; requestId?: string }
@@ -321,7 +323,18 @@ function ProfileList({ state, compact = false }: { state: LoadState<Profile[]>; 
       <div className="empty-state">
         <span className="empty-icon" aria-hidden="true">▤</span>
         <h3>No profiles configured</h3>
-        <p>Add a profile to your local configuration to see it here.</p>
+        <p>
+          The local configuration does not contain any profiles yet, or no configuration
+          file exists.
+        </p>
+        <p>
+          Profiles cannot be created in the app yet. Add a profile to the local JSON
+          configuration file, then reload this page.
+        </p>
+        <a className="text-link" href={CONFIGURATION_DOCS_URL} target="_blank" rel="noreferrer">
+          Read the configuration instructions<span aria-hidden="true">↗</span>
+          <span className="visually-hidden"> (opens in a new tab)</span>
+        </a>
       </div>
     );
   }
